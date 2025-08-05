@@ -1,0 +1,210 @@
+#!/bin/sh
+#
+#  ANSCUSTOM script
+#
+#      The following variables should be set for your system in the case
+#       block below:
+#  
+#
+#      VARIABLE NAME         DESCRIPTION                                    
+#      =============         ===========
+#      revn_rl               ansys release number
+#      revn                  convienient way to change versions
+#      SYSDIR                platform directory
+#      MACH                  machine name
+#      path                  path to ANSYS objects directory
+#      Cpath                 path to ANSYS commonfiles/Tcl directory
+#      ipath                 path to ANSYS include directory
+#      lpath                 path to ANSYS shared library
+#      spath                 path to ANSYS system runtime libraries
+#      fpproc                cpp preprocessor command for FORTRAN (ibm only)
+#      fcompile              compile command for FORTRAN
+#      ccompile              compile command for C
+#      flinkx11              link command for x11
+#      flink3d               link command for 3d
+#      lopnsx11              link options for x11
+#      lopns3d               link options for 3d
+#      objx11                objects for x11
+#      obj3d                 objects for 3d
+#      xxlib                 Library driver
+#      yylib                 System driver
+#      zzlib                 X Windows driver
+#      dname3d               driver name for 3d
+#      lopnsdis              link options for distributed ANSYS
+#      fopenmpflags          OpenMP flags for FORTRAN
+#      copenmpflags          OpenMP flags for C
+#
+# Functions
+#
+inquire()
+{
+   if [ $echoflag -eq 1 ]; then
+      echo " $1:  c"
+   else
+      echo -n " $1: "
+   fi
+}
+
+# Be sure to update both variables below.  Cannot be automated since
+# sometimes the revn contains extra digits such as 12.1.1.
+revn=150
+revn_rl=15.0
+
+# Attempt to locate anssh.ini...
+currdir=`pwd`
+calldir=`echo $0 | sed 's!/[a-zA-Z0-9_ .]*$!!'`
+if test "$calldir" = "$0"
+then
+   calldir=`pwd`
+fi
+cd "$calldir"
+if [ -d "../../" ]; then
+   cd ../../ 2> /dev/null
+fi
+calldir=`pwd`
+cd "$currdir"
+
+if [ -f "$calldir/bin/anssh.ini" ]; then
+   if [ ! -z "$DEBUG_ANSSCRIPTS" ]; then
+      echo "Self located in ANSCUSTOM..."
+   fi
+   . "$calldir/bin/anssh.ini"
+else
+   ansdir=/ansys_inc/v$revn/ansys
+   . $ansdir/bin/anssh.ini
+fi
+
+SYSDIR="$ANSYS_SYSDIR"
+
+# Defaults (may be overwritten in system section)
+path="$ANSYS_DIR/customize/user"
+Cpath="$ANSYSCOMMON_DIR/Tcl/lib"
+ipath="$ANSYS_DIR/customize/include"
+lpath="$ANSYS_DIR/lib"
+spath="$ANSYS_DIR/syslib"
+bpath="$ANSYS_DIR/bin"
+
+dname3d="NONE"
+
+echo "$SYSDIR" 
+
+case "$SYSDIR" in
+   linia32|linia64|linx64)
+      echoflag=0
+      ;;
+   * )
+      echoflag=1
+      ;;
+esac
+
+case "$SYSDIR" in
+
+   # Intel EM64T 64-bit Linux
+   linx64 )
+      MACH="Intel x64_64 64-bit Linux"
+      fopenmpflags=""
+      copenmpflags=""
+
+      fcompile="ifort -c -fpp -qopenmp -fpic -fp-model precise -fimf-arch-consistency=true\
+         -O3 -ftz -xCORE-AVX2 -mtune=core-avx2 -nbs -align\
+         -mcmodel=medium -DLINX64_SYS -DLINUXEM64T_SYS -DFORTRAN\
+         -DOPENMP -DCADOE_SOLVER -DANSYS_MEM -DPARDISO -Dintel_\
+         -Dmetis4 -DAdd_ \
+         -I./Includes -I../Includes -I./MUMPS -I../MUMPS\
+         -I$ipath -I/usr/X11R6/include -I/opt/sgi/scotch/5.1.11/include"
+
+      ccompile="icc -c -qopenmp -Qoption,cpp,--c99 -fpic -O2  -fp-model precise -fimf-arch-consistency=true\
+         -mcmodel=medium -xCORE-AVX2 -mtune=core-avx2 -DLINX64_SYS -DLINUXEM64T_SYS\
+         -DNOSTDCALL -DANSYS_MEM -Dmetis -DPARDISO  -DARGTRAIL\
+         -DMKL_AVAILABLE -DCADOE_SOLVER -D__STDC__ -DAdd_ \
+         -DMUMPS_ARITH=MUMPS_ARITH_d -I./Includes -I../Includes\
+         -I./MUMPS -I../MUMPS -I/usr/X11R6/include -I/opt/sgi/scotch/5.1.11/include -I$ipath"
+
+      ;;
+
+
+   * ) 
+      echo " >>>---> Error:"
+      echo
+      echo "         Machine not supported"
+      exit
+      ;;
+esac
+##########################################################################
+
+         if [ -f `echo *.F | sed "s/ .*//"` ]; then
+            for i in mumps_ooc_common.F dmumps_struc_def.F tools_common_mod.F dmumps_comm_buffer.F fac_future_niv2_mod.F dmumps_load.F mumps_static_mapping.F dmumps_ooc_buffer.F dmumps_ooc.F fac_asm_build_sort_index_m.F fac_asm_build_sort_index_ELT_m.F dfac_omp_m.F dfac_front_aux.F dfac_front_LDLT_type1.F dfac_front_type2_aux.F dfac_front_LDLT_type2.F dfac_front_LU_type1.F dfac_front_LU_type2.F dfac_front_LDLT_type2.F front_data_mgt_m.F fac_descband_data_m.F fac_maprow_data_m.F dstatic_ptr_m.F mumps_sol_es.F dfac_asm_master_m.F dfac_asm_master_ELT_m.F dfac_par_m.F `ls -1 | grep F | grep -v dmumps_p | paste -s -` `ls -1 | grep F | grep dmumps_p | paste -s -`
+            do
+               echo
+               echo " COMPILING $i"
+
+               # Check if routine contains OpenMP directives 
+               if grep '!$OMP' "$i" > /dev/null; then
+                  fcompile="$fcompile $fopenmpflags"
+               fi
+
+               $fcompile $i
+               if [ $? -ne 0 ]; then
+                  echo
+                  echo " FAILURE COMPILING $i"
+                  echo " An Error occurred while compiling a user FORTRAN routine."
+                  echo " Please check the FORTRAN syntax and rerun ANSCUSTOM."
+                  echo " Exiting the ANSCUSTOM procedure . . ."
+                  echo
+                  exit 1
+               fi
+            done
+         fi
+ 
+         if [ -f `echo *.c | sed "s/ .*//"` ]; then
+            for i in *.c
+            do
+               echo
+               echo " COMPILING $i"
+
+               if grep '#pragma *omp' "$i" > /dev/null; then
+                  ccompile="$ccompile $copenmpflags"
+               fi
+
+               $ccompile $i
+               if [ $? -ne 0 ]; then
+                  echo
+                  echo " FAILURE COMPILING $i"
+                  echo " An Error occurred while compiling a user C routine."
+                  echo " Please check the C syntax and rerun ANSCUSTOM."
+                  echo " Exiting the ANSCUSTOM procedure . . ."
+                  echo
+                  echo
+                  exit 1
+               fi
+            done
+         fi
+
+         #
+         # Uncompress library files
+         compressed="`ls ${path}/${SYSDIR}/*.Z 2>/dev/null`"
+
+         if [ "${compressed}" != "" ]; then
+            echo
+            echo " Uncompressing object libraries - please wait."
+            uncompress ${compressed}
+         fi
+
+# CREATE LIBRARIES
+
+# mumpsobj created using
+#   lorder `ls *.o | grep -v dmumps` | tsort
+mumpsobj="elapse.o mpi.o mumps_io.o ana_omp_m.o tools_common_mod.o mumps_static_mapping.o mumps_sol_es.o fac_future_niv2_mod.o mumps_comm_ibcast.o mumps_ooc_common.o double_linked_list.o fac_asm_build_sort_index_m.o fac_asm_build_sort_index_ELT_m.o omp_tps_common_m.o mumps_l0_omp_m.o front_data_mgt_m.o fac_maprow_data_m.o fac_descband_data_m.o fac_ibct_data_m.o ana_orderings.o ana_AMDMF.o bcast_errors.o estim_flops.o mumps_type_size.o mumps_type2_blocking.o mumps_version.o tools_common.o mumps_print_defined.o mumps_common.o mumps_orderings.o mumps_size.o mumps_io.o mumps_io_basic.o mumps_io_thread.o mumps_io_err.o ana_set_ordering.o mumps_numa.o "
+
+dmumpsobj=" dana_aux_par.o dana_lr.o dfac_asm_master_m.o dfac_asm_master_ELT_m.o domp_tps_m.o dmumps_comm_buffer.o dmumps_load.o dmumps_lr_data_m.o dmumps_ooc_buffer.o dmumps_ooc.o dmumps_struc_def.o dstatic_ptr_m.o dlr_core.o dfac_lr.o dfac_omp_m.o dfac_par_m.o dfac_front_LU_type1.o dfac_front_LU_type2.o dfac_front_LDLT_type1.o dfac_front_LDLT_type2.o dfac_front_aux.o dfac_front_type2_aux.o dini_driver.o dana_driver.o dfac_driver.o dsol_driver.o dend_driver.o dana_aux_ELT.o dana_aux.o dana_dist_m.o dana_LDLT_preprocess.o dana_reordertree.o darrowheads.o dbcast_int.o dfac_asm_ELT.o dfac_asm.o dfac_b.o dfac_distrib_distentry.o dfac_distrib_ELT.o dfac_lastrtnelind.o dfac_mem_alloc_cb.o dfac_mem_compress_cb.o dfac_mem_free_block_cb.o dfac_mem_stack_aux.o dfac_mem_stack.o dfac_process_band.o dfac_process_blfac_slave.o dfac_process_blocfacto_LDLT.o dfac_process_blocfacto.o dfac_process_bf.o dfac_process_end_facto_slave.o dfac_process_contrib_type1.o dfac_process_contrib_type2.o dfac_process_contrib_type3.o dfac_process_maprow.o dfac_process_master2.o dfac_process_message.o dfac_process_root2slave.o dfac_process_root2son.o dfac_process_rtnelind.o dfac_root_parallel.o dfac_scalings.o dfac_determinant.o dfac_scalings_simScaleAbs.o dfac_scalings_simScale_util.o dfac_sol_pool.o dfac_type3_symmetrize.o dini_defaults.o dmumps_driver.o dmumps_iXamax.o dana_mtrans.o dooc_panel_piv.o drank_revealing.o dsol_aux.o dsol_bwd_aux.o dsol_bwd.o dsol_c.o dsol_fwd_aux.o dsol_fwd.o dsol_matvec.o dsol_root_parallel.o dtools.o dtype3_root.o dmumps_restart.o "
+# circular dependence dmumps_part1.o and dmumps_ooc.o
+
+libtarget="libAns`pwd | rev | cut -f1 -d"/" | rev`.a"
+xiar rcv $libtarget $mumpsobj
+ranlib $libtarget
+mv $libtarget ..
+
+libtarget="libAnsD`pwd | rev | cut -f1 -d"/" | rev`.a"
+xiar rcv $libtarget $dmumpsobj
+ranlib $libtarget
+mv $libtarget ..

@@ -1,0 +1,201 @@
+#!/bin/sh
+#
+#  ANSCUSTOM script
+#
+#      The following variables should be set for your system in the case
+#       block below:
+#  
+#
+#      VARIABLE NAME         DESCRIPTION                                    
+#      =============         ===========
+#      revn_rl               ansys release number
+#      revn                  convienient way to change versions
+#      SYSDIR                platform directory
+#      MACH                  machine name
+#      path                  path to ANSYS objects directory
+#      Cpath                 path to ANSYS commonfiles/Tcl directory
+#      ipath                 path to ANSYS include directory
+#      lpath                 path to ANSYS shared library
+#      spath                 path to ANSYS system runtime libraries
+#      fpproc                cpp preprocessor command for FORTRAN (ibm only)
+#      fcompile              compile command for FORTRAN
+#      ccompile              compile command for C
+#      flinkx11              link command for x11
+#      flink3d               link command for 3d
+#      lopnsx11              link options for x11
+#      lopns3d               link options for 3d
+#      objx11                objects for x11
+#      obj3d                 objects for 3d
+#      xxlib                 Library driver
+#      yylib                 System driver
+#      zzlib                 X Windows driver
+#      dname3d               driver name for 3d
+#      lopnsdis              link options for distributed ANSYS
+#      fopenmpflags          OpenMP flags for FORTRAN
+#      copenmpflags          OpenMP flags for C
+#
+# Functions
+#
+inquire()
+{
+   if [ $echoflag -eq 1 ]; then
+      echo " $1: \c"
+   else
+      echo -n " $1: "
+   fi
+}
+
+# Be sure to update both variables below.  Cannot be automated since
+# sometimes the revn contains extra digits such as 12.1.1.
+revn=150
+revn_rl=15.0
+
+# Attempt to locate anssh.ini...
+currdir=`pwd`
+calldir=`echo $0 | sed 's!/[a-zA-Z0-9_\.]*$!!'`
+if test "$calldir" = "$0"
+then
+   calldir=`pwd`
+fi
+cd "$calldir"
+if [ -d "../../" ]; then
+   cd ../../ 2> /dev/null
+fi
+calldir=`pwd`
+cd "$currdir"
+
+if [ -f "$calldir/bin/anssh.ini" ]; then
+   if [ ! -z "$DEBUG_ANSSCRIPTS" ]; then
+      echo "Self located in ANSCUSTOM..."
+   fi
+   . "$calldir/bin/anssh.ini"
+else
+   ansdir=/ansys_inc/v$revn/ansys
+   . $ansdir/bin/anssh.ini
+fi
+
+SYSDIR="$ANSYS_SYSDIR"
+
+# Defaults (may be overwritten in system section)
+path="$ANSYS_DIR/customize/user"
+Cpath="$ANSYSCOMMON_DIR/Tcl/lib"
+ipath="$ANSYS_DIR/customize/include"
+lpath="$ANSYS_DIR/lib"
+spath="$ANSYS_DIR/syslib"
+bpath="$ANSYS_DIR/bin"
+
+dname3d="NONE"
+
+echo "$SYSDIR" 
+
+case "$SYSDIR" in
+   linia32|linia64|linx64)
+      echoflag=0
+      ;;
+   * )
+      echoflag=1
+      ;;
+esac
+
+case "$SYSDIR" in
+
+   # Intel EM64T 64-bit Linux
+   linx64 )
+      MACH="Intel x64_64 64-bit Linux"
+      fopenmpflags=""
+      copenmpflags=""
+
+      fcompile="ifort -c -fpp -qopenmp -fpic\
+         -O3 -ftz -xCORE-AVX2 -mtune=core-avx2 -nbs -align\
+         -mcmodel=medium -DLINX64_SYS -DLINUXEM64T_SYS -DFORTRAN \
+         -DOPENMP -DCADOE_SOLVER -DANSYS_MEM -DPARDISO \
+         -DMUMPS_ARITH=MUMPS_ARITH_d -I./Includes \
+         -I../Includes -I./MUMPS -I../MUMPS -I$ipath -I/usr/X11R6/include"
+
+      ccompile="icc -c -qopenmp -Qoption,cpp,--c99 -fpic -02\
+         -mcmodel=medium -xCORE-AVX2 -mtune=core-avx2 -DLINX64_SYS -DLINUXEM64T_SYS \
+         -DNOSTDCALL -DANSYS_MEM -DPARDISO -DARGTRAIL \
+         -DMUMPS_ARITH=MUMPS_ARITH_d \
+         -DMKL_AVAILABLE -DCADOE_SOLVER -I./Includes -I../Includes \
+         -I./MUMPS -I../MUMPS -I/usr/X11R6/include -I$ipath"
+
+      ;;
+
+
+   * ) 
+      echo " >>>---> Error:"
+      echo
+      echo "         Machine not supported"
+      exit
+      ;;
+esac
+##########################################################################
+
+         if [ -f `echo *.F | sed "s/ .*//"` ]; then
+            for i in *.F
+            do
+               echo
+               echo " COMPILING $i"
+
+               # Check if routine contains OpenMP directives 
+               if grep '!$OMP' "$i" > /dev/null; then
+                  fcompile="$fcompile $fopenmpflags"
+               fi
+
+               $fcompile $i
+               if [ $? -ne 0 ]; then
+                  echo
+                  echo " FAILURE COMPILING $i"
+                  echo " An Error occurred while compiling a user FORTRAN routine."
+                  echo " Please check the FORTRAN syntax and rerun ANSCUSTOM."
+                  echo " Exiting the ANSCUSTOM procedure . . ."
+                  echo
+                  exit 1
+               fi
+            done
+         fi
+ 
+         if [ -f `echo *.c | sed "s/ .*//"` ]; then
+            for i in *.c
+            do
+               echo
+               echo " COMPILING $i"
+
+               if grep '#pragma *omp' "$i" > /dev/null; then
+                  ccompile="$ccompile $copenmpflags"
+               fi
+
+               $ccompile $i
+               if [ $? -ne 0 ]; then
+                  echo
+                  echo " FAILURE COMPILING $i"
+                  echo " An Error occurred while compiling a user C routine."
+                  echo " Please check the C syntax and rerun ANSCUSTOM."
+                  echo " Exiting the ANSCUSTOM procedure . . ."
+                  echo
+                  echo
+                  exit 1
+               fi
+            done
+         fi
+
+         #
+         # Uncompress library files
+         compressed="`ls ${path}/${SYSDIR}/*.Z 2>/dev/null`"
+
+         if [ "${compressed}" != "" ]; then
+            echo
+            echo " Uncompressing object libraries - please wait."
+            uncompress ${compressed}
+         fi
+
+# CREATE LIBRARY
+libtarget="libAns`pwd | rev | cut -f1 -d"/" | rev`.a"
+xiar rcv $libtarget `ls -1 *.o | grep -v MumpsSolver | paste -s -`
+ranlib $libtarget
+mv $libtarget ..
+
+libtarget="libAnsMumpsSolver.a"
+xiar rcv $libtarget MumpsSolver.o
+ranlib $libtarget
+mv $libtarget ..
